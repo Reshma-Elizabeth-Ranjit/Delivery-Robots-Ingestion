@@ -14,21 +14,19 @@ def read_parquet_from_folder(spark, folder_path):
     Reads all Parquet files in a folder (using this function as the storage is in local)
     :param spark: SparkSession
     :param folder_path: the source folder to read the data from
-    :return: DataFrame
+    :return: a DataFrame containing the data in the folder provided
     """
     files = [str(f) for f in Path(folder_path).rglob("*.parquet")]
     if not files:
         raise FileNotFoundError(f"No Parquet files found in {folder_path}")
-
     return spark.read.parquet(*files)
 
 
 def get_schema():
     """
-    Sets the schema for the yellow taxi trip dataset
-    :return: schema
+    Sets the schema for the Robot's delivery data (yellow taxi trip dataset)
+    :return: the schema generated
     """
-    # Define the schema
     schema = StructType([
         StructField("VendorID", IntegerType(), True),
         StructField("tpep_pickup_datetime", TimestampType(), True),
@@ -56,11 +54,10 @@ def get_schema():
 def validate_schema(existing_schema, new_schema):
     """
     To check if the incoming schema matches with the existing schema
-    :param existing_schema:
-    :param new_schema:
-    :return:
+    :param existing_schema: the set schema
+    :param new_schema: the schema of the incoming data
+    :return: boolean
     """
-    # To ignore
     existing_fields = {field.name: field.dataType for field in existing_schema.fields}
     new_fields = {field.name: field.dataType for field in new_schema.fields}
 
@@ -77,68 +74,100 @@ def send_alert(message):
     :param message: The alert message that has to be sent
     :return: None
     """
-    # Slack Webhook URL
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
     if not webhook_url:
         logging.error("SLACK_WEBHOOK_URL is not set!")
         return
     try:
-        # Send the message
         response = requests.post(webhook_url, json=message)
-
-        # Check if the message was sent successfully
         response.raise_for_status()
-
-        # If the status code is 200, the message was sent successfully
         logging.info("Message sent successfully!")
     except Exception as e:
         logging.error(f"Failed to send message: {e}")
 
 
+def validate_and_filter(robot_data_df):
+    """
+    To run validations and filter anomalies
+    :param robot_data_df: the dataframe that has to be validated and filtered
+    :return: the filtered dataframe
+    """
+    logging.info("Validation and cleansing started")
+
+    # Dropping duplicates
+    robot_data_df = robot_data_df.dropDuplicates()
+
+    # Validation for pickup/dropoff locations
+    invalid_pickup_location = robot_data_df.filter(col("PULocationID").isNull())
+    invalid_dropoff_location = robot_data_df.filter(col("DOLocationID").isNull())
+    if invalid_pickup_location.count() > 0 or invalid_dropoff_location.count() > 0:
+        message = {"text": "NULL values found for pickup/dropoff locations"}
+        send_alert(message)
+
+    # Validation for pickup/dropoff timestamps
+    invalid_pickup_times = robot_data_df.filter(col("tpep_pickup_datetime").isNull())
+    invalid_dropoff_times = robot_data_df.filter(col("tpep_dropoff_datetime").isNull())
+    if invalid_pickup_times.count() > 0 or invalid_dropoff_times.count() > 0:
+        message = {"text": "NULL values found for pickup/dropoff timestamps"}
+        send_alert(message)
+        logging.warning("NULL values found for pickup/dropoff timestamps")
+        return None
+
+    # Ensuring timestamp format
+    robot_data_staged_df = robot_data_df.withColumn(
+        "tpep_pickup_datetime",
+        to_timestamp(col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")
+    ).withColumn(
+        "tpep_dropoff_datetime",
+        to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
+    )
+    if not validate_schema(get_schema(), robot_data_staged_df.schema):
+        return None
+
+    robot_data_staged_df = robot_data_staged_df.withColumn(
+        "pickup_date",
+        to_date(col("tpep_pickup_datetime"))
+    ).withColumn(
+        "dropoff_date",
+        to_date(col("tpep_dropoff_datetime"))
+    )
+
+    # Check for negative values and filter them out
+    negative_values_filtered_df = robot_data_staged_df.filter(
+        (col("fare_amount") < 0) &
+        (col("trip_distance") < 0) &
+        (col("tip_amount") < 0) &
+        (col("total_amount") < 0))
+    if negative_values_filtered_df.count() > 0:
+        message = {"text": "Negative values found for amount fields"}
+        send_alert(message)
+        logging.warning("Negative values found for amount fields")
+        logging.info(f"Count of records with negative values: {negative_values_filtered_df.count()}")
+        robot_data_staged_df = robot_data_staged_df.filter(
+            (col("fare_amount") >= 0) &
+            (col("trip_distance") >= 0) &
+            (col("tip_amount") >= 0) &
+            (col("total_amount") >= 0)
+        )
+    logging.info("Validation and cleansing done")
+    return robot_data_staged_df
+
+
 def create_staged_table(spark):
+    """
+    To create staged delta tables
+    :param spark: SparkSession
+    :return: boolean
+    """
     try:
-        # Read the data from the folder (In real scenario from AWS S3 location)
         input_data_path = os.path.join(os.path.dirname(__file__), 'source_data')
         robot_data_df = read_parquet_from_folder(spark, input_data_path)
-
-        # Remove duplicate records
-        robot_data_df = robot_data_df.dropDuplicates()
-        invalid_pickup_location = robot_data_df.filter(col("PULocationID").isNull())
-        invalid_dropoff_location = robot_data_df.filter(col("DOLocationID").isNull())
-        if invalid_pickup_location.count() > 0 or invalid_dropoff_location.count() > 0:
-            message = {"text": "NULL values found for pickup/dropoff locations"}
-            send_alert(message)
-
-        invalid_pickup_times = robot_data_df.filter(col("tpep_pickup_datetime").isNull())
-        invalid_dropoff_times = robot_data_df.filter(col("tpep_dropoff_datetime").isNull())
-
-        # Proceed with further processing if no invalid timestamps are found
-        if invalid_pickup_times.count() == 0 and invalid_dropoff_times.count() == 0:
-            # Ensure date/timestamp format
-            robot_data_staged_df = robot_data_df.withColumn(
-                "tpep_pickup_datetime",
-                to_timestamp(col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")
-            ).withColumn(
-                "tpep_dropoff_datetime",
-                to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
-            )
-            if not validate_schema(get_schema(), robot_data_staged_df.schema):
-                return False
-            robot_data_staged_df = robot_data_df.withColumn(
-                "pickup_date",
-                to_date(col("tpep_pickup_datetime"))
-            ).withColumn(
-                "dropoff_date",
-                to_date(col("tpep_dropoff_datetime"))
-            )
-            robot_data_staged_df.createOrReplaceTempView("robot_trip_staged_table")
-            logging.info("Staging table created successfully")
-            return True
-        else:
-            message = {"text": "NULL values found for pickup/dropoff timestamps"}
-            send_alert(message)
-            logging.warning("NULL values found for pickup/dropoff timestamps")
+        robot_data_staged_df = validate_and_filter(robot_data_df)
+        if robot_data_staged_df is None:
             return False
+        robot_data_staged_df.createOrReplaceTempView("robot_trip_staged_table")
+        logging.info("Staging table created successfully")
+        return True
     except Exception as e:
         logging.error(f"An error occurred: {str(e)}")
         return False
