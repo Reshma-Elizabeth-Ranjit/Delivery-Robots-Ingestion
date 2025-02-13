@@ -94,8 +94,21 @@ def validate_and_filter(robot_data_df):
     """
     logging.info("Validation and cleansing started")
 
+    # Validate schema first
+    if not validate_schema(get_schema(), robot_data_df.schema):
+        return None
+
     # Dropping duplicates
     robot_data_df = robot_data_df.dropDuplicates()
+
+    # Ensuring timestamp format
+    robot_data_df = robot_data_df.withColumn(
+        "tpep_pickup_datetime",
+        to_timestamp(col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")
+    ).withColumn(
+        "tpep_dropoff_datetime",
+        to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
+    )
 
     # Validation for pickup/dropoff locations
     invalid_pickup_location = robot_data_df.filter(col("PULocationID").isNull())
@@ -113,18 +126,7 @@ def validate_and_filter(robot_data_df):
         logging.warning("NULL values found for pickup/dropoff timestamps")
         return None
 
-    # Ensuring timestamp format
     robot_data_staged_df = robot_data_df.withColumn(
-        "tpep_pickup_datetime",
-        to_timestamp(col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")
-    ).withColumn(
-        "tpep_dropoff_datetime",
-        to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
-    )
-    if not validate_schema(get_schema(), robot_data_staged_df.schema):
-        return None
-
-    robot_data_staged_df = robot_data_staged_df.withColumn(
         "pickup_date",
         to_date(col("tpep_pickup_datetime"))
     ).withColumn(
