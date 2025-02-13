@@ -1,4 +1,5 @@
-Delivery Robots Ingestion
+**Delivery Robots Ingestion**
+
 This project handles the ingestion, validation, cleansing, and processing of delivery robots' trip data using Apache Spark on Databricks. The code is written mainly in Python and PySpark.
 
 Architecture diagram:
