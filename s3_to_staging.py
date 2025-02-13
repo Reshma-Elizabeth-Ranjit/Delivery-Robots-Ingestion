@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 load_dotenv("local.env")
 env_variable = os.getenv("ENV")
 
+
 def read_parquet_from_folder(spark, folder_path):
     """
     Reads all Parquet files in a folder (using this function as the storage is in local)
@@ -84,9 +85,9 @@ def send_alert(message):
     try:
         response = requests.post(webhook_url, json=message)
         response.raise_for_status()
-        logging.info("Message sent successfully!")
+        logging.info("Alert message sent successfully!")
     except Exception as e:
-        logging.error(f"Failed to send message: {e}")
+        logging.error(f"Failed to send alert message: {e}")
 
 
 def validate_and_filter(robot_data_df):
@@ -125,14 +126,17 @@ def validate_and_filter(robot_data_df):
         send_alert(message)
 
     # Validation for pickup/dropoff timestamps
-    invalid_pickup_times = robot_data_df.filter(col("tpep_pickup_datetime").isNull())
-    invalid_dropoff_times = robot_data_df.filter(col("tpep_dropoff_datetime").isNull())
-    if invalid_pickup_times.count() > 0 or invalid_dropoff_times.count() > 0:
-        message = {"text": f"ENV: {env_variable} \nNULL values found for pickup/dropoff timestamps",
+    invalid_pickup_drop_times = (robot_data_df.filter((col("tpep_pickup_datetime").isNull()) |
+                                                      (col("tpep_dropoff_datetime").isNull()) |
+                                                      (col("tpep_dropoff_datetime") <= col("tpep_pickup_datetime"))))
+    if invalid_pickup_drop_times.count() > 0:
+        message = {"text": f"ENV: {env_variable} \nInvalid values found for pickup/dropoff timestamps",
                    "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid values found for pickup/dropoff timestamps")
+        logging.info(f"Count of records with invalid pickup/dropoff timestamps: {invalid_pickup_drop_times.count()}")
         send_alert(message)
-        logging.warning("NULL values found for pickup/dropoff timestamps")
-        return None
+        robot_data_df = robot_data_df.filter(col("tpep_pickup_datetime").isNotNull() & col(
+            "tpep_dropoff_datetime").isNotNull()).filter(col("tpep_dropoff_datetime") > col("tpep_pickup_datetime"))
 
     robot_data_staged_df = robot_data_df.withColumn(
         "pickup_date",
@@ -142,7 +146,7 @@ def validate_and_filter(robot_data_df):
         to_date(col("tpep_dropoff_datetime"))
     )
 
-    # Check for negative values and filter them out
+    # Check for negative values for amount fields and filter them out
     negative_values_filtered_df = robot_data_staged_df.filter(
         (col("fare_amount") < 0) &
         (col("trip_distance") < 0) &
@@ -170,6 +174,56 @@ def validate_and_filter(robot_data_df):
         logging.info(f"Count of records with invalid Vendor IDs : {invalid_vendor_id_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("VendorID").isin([1, 2]))
+
+    # Check passenger count
+    invalid_passenger_count_df = robot_data_staged_df.filter(col("passenger_count") < 0)
+    if invalid_passenger_count_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid passenger count found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid passenger count found")
+        logging.info(f"Count of records with invalid passenger counts : {invalid_passenger_count_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("passenger_count") >= 0)
+
+    # Check trip_distance
+    invalid_trip_distance_df = robot_data_staged_df.filter(col("trip_distance") < 0)
+    if invalid_trip_distance_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid trip_distance found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid trip_distance found")
+        logging.info(f"Count of records with invalid trip_distance : {invalid_trip_distance_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("trip_distance") >= 0)
+
+    # Check store_and_fwd_flag
+    invalid_store_and_fwd_flag_df = robot_data_staged_df.filter(~col("store_and_fwd_flag").isin(["Y", "N"]))
+    if invalid_store_and_fwd_flag_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid store_and_fwd_flag found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid store_and_fwd_flag found")
+        logging.info(f"Count of records with invalid store_and_fwd_flag : {invalid_store_and_fwd_flag_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("store_and_fwd_flag").isin(["Y", "N"]))
+
+    # Check RatecodeID
+    invalid_ratecodeid_df = robot_data_staged_df.filter(~col("RatecodeID").isin([1, 2, 3, 4, 5, 6]))
+    if invalid_ratecodeid_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid RatecodeID found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid RatecodeIDs found")
+        logging.info(f"Count of records with invalid RatecodeIDs : {invalid_ratecodeid_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("RatecodeID").isin([1, 2, 3, 4, 5, 6]))
+
+    # Check payment_type
+    invalid_payment_type_df = robot_data_staged_df.filter(~col("payment_type").isin([1, 2, 3, 4, 5, 6]))
+    if invalid_payment_type_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid payment_type found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid payment_type found")
+        logging.info(f"Count of records with invalid payment_type : {invalid_payment_type_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("payment_type").isin([1, 2, 3, 4, 5, 6]))
     logging.info("Validation and cleansing done")
     return robot_data_staged_df
 
