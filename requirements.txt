@@ -1,0 +1,9 @@
+holidays==0.66
+pip==25.0.1
+py4j==0.10.9.9
+pyspark==4.0.0.dev2
+pytest==8.3.4
+python-dateutil==2.9.0.post0
+python-dotenv==1.0.1
+requests==2.32.3
+urllib3==2.3.0

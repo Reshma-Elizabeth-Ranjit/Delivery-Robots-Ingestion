@@ -4,10 +4,13 @@ from pyspark.sql.functions import col, to_timestamp, to_date
 import requests
 import os
 import logging
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+load_dotenv("local.env")
+env_variable = os.getenv("ENV")
 
 def read_parquet_from_folder(spark, folder_path):
     """
@@ -94,13 +97,6 @@ def validate_and_filter(robot_data_df):
     """
     logging.info("Validation and cleansing started")
 
-    # Validate schema first
-    if not validate_schema(get_schema(), robot_data_df.schema):
-        return None
-
-    # Dropping duplicates
-    robot_data_df = robot_data_df.dropDuplicates()
-
     # Ensuring timestamp format
     robot_data_df = robot_data_df.withColumn(
         "tpep_pickup_datetime",
@@ -110,18 +106,30 @@ def validate_and_filter(robot_data_df):
         to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
     )
 
+    # Validate schema first
+    if not validate_schema(get_schema(), robot_data_df.schema):
+        message = {"text": f"ENV: {env_variable} \n Schema mismatch occurred",
+                   "username": "DeliveryRobotAlertBot"}
+        send_alert(message)
+        return None
+
+    # Dropping duplicates
+    robot_data_df = robot_data_df.dropDuplicates()
+
     # Validation for pickup/dropoff locations
     invalid_pickup_location = robot_data_df.filter(col("PULocationID").isNull())
     invalid_dropoff_location = robot_data_df.filter(col("DOLocationID").isNull())
     if invalid_pickup_location.count() > 0 or invalid_dropoff_location.count() > 0:
-        message = {"text": "NULL values found for pickup/dropoff locations"}
+        message = {"text": f"ENV: {env_variable} \n NULL values found for pickup/dropoff locations",
+                   "username": "DeliveryRobotAlertBot"}
         send_alert(message)
 
     # Validation for pickup/dropoff timestamps
     invalid_pickup_times = robot_data_df.filter(col("tpep_pickup_datetime").isNull())
     invalid_dropoff_times = robot_data_df.filter(col("tpep_dropoff_datetime").isNull())
     if invalid_pickup_times.count() > 0 or invalid_dropoff_times.count() > 0:
-        message = {"text": "NULL values found for pickup/dropoff timestamps"}
+        message = {"text": f"ENV: {env_variable} \nNULL values found for pickup/dropoff timestamps",
+                   "username": "DeliveryRobotAlertBot"}
         send_alert(message)
         logging.warning("NULL values found for pickup/dropoff timestamps")
         return None
@@ -141,16 +149,27 @@ def validate_and_filter(robot_data_df):
         (col("tip_amount") < 0) &
         (col("total_amount") < 0))
     if negative_values_filtered_df.count() > 0:
-        message = {"text": "Negative values found for amount fields"}
-        send_alert(message)
+        message = {"text": f"ENV: {env_variable} \nNegative values found for amount fields",
+                   "username": "DeliveryRobotAlertBot"}
         logging.warning("Negative values found for amount fields")
         logging.info(f"Count of records with negative values: {negative_values_filtered_df.count()}")
+        send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(
             (col("fare_amount") >= 0) &
             (col("trip_distance") >= 0) &
             (col("tip_amount") >= 0) &
             (col("total_amount") >= 0)
         )
+
+    # Check for valid VendorID
+    invalid_vendor_id_df = robot_data_staged_df.filter(~col("VendorID").isin([1, 2]))
+    if invalid_vendor_id_df.count() > 0:
+        message = {"text": f"ENV: {env_variable} \n Invalid Vendor IDs found",
+                   "username": "DeliveryRobotAlertBot"}
+        logging.warning("Invalid Vendor IDs found")
+        logging.info(f"Count of records with invalid Vendor IDs : {invalid_vendor_id_df.count()}")
+        send_alert(message)
+        robot_data_staged_df = robot_data_staged_df.filter(col("VendorID").isin([1, 2]))
     logging.info("Validation and cleansing done")
     return robot_data_staged_df
 
