@@ -1,10 +1,12 @@
+"""
+To create final delta tables by doing necessary joins
+"""
 import os
+import logging
 from dotenv import load_dotenv
 import holidays
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql.functions import col, to_date
-import logging
-from pyspark.sql.functions import broadcast
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -44,7 +46,7 @@ def get_city_zones_data(spark):
         city_zones_df = spark.read.option("header", "true").csv(city_zones_data_path)
         return city_zones_df
     except Exception as e:
-        logging.error(f"Error loading city zones data: {e}")
+        logging.error("Error loading city zones data: %s", e)
         return None
 
 
@@ -67,21 +69,23 @@ def create_final_tables(spark):
             LEFT JOIN zones_table do 
                 ON y.DOLocationID = do.LocationID
         """)
-        intercity_trip = intercity_trip.filter(intercity_trip.PickupCity != intercity_trip.DropoffCity)
+        intercity_trip = intercity_trip.filter(intercity_trip.PickupCity !=
+                                               intercity_trip.DropoffCity)
         intercity_trip.createOrReplaceTempView("intercity_trip_table")
 
         # Extract the year to download the holiday for the year
-        extract_year = spark.sql(
-            "select distinct (year(pickup_date), year(dropoff_date)) as year from robot_trip_staged_table")
+        extract_year = spark.sql("select distinct (year(pickup_date), year(dropoff_date)) as year"
+                                 " from robot_trip_staged_table")
         years = extract_year.select("year").distinct().collect()
 
         # Extracting years from col1 and col2, then storing in a set to avoid duplicates
         years_set = {year for row in years for year in (row.year.col1, row.year.col2)}
         holiday_dataset = get_holiday_dataset(spark, years_set)
         holiday_dataset.createOrReplaceTempView("holiday_dataset_table")
-        holiday_trip_result = spark.sql("select * from robot_trip_staged_table y join holiday_dataset_table h where "
-                                        "y.pickup_date = h.date or y.dropoff_date = h.date")
+        holiday_trip_result = spark.sql("select * from robot_trip_staged_table y "
+                                        "join holiday_dataset_table h on y.pickup_date = h.date "
+                                        "or y.dropoff_date = h.date")
         holiday_trip_result.createOrReplaceTempView("holiday_trip_table")
         logging.info("Final Delta tables created successfully")
     except Exception as e:
-        logging.error(f"An error occurred: {str(e)}")
+        logging.error("An error occurred: %s", e)

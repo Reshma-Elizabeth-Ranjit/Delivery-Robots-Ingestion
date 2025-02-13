@@ -1,9 +1,12 @@
+"""
+Main file to orchestrate other files
+"""
+import logging
+import os
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
-import logging
 import s3_to_staging
 import staging_to_delta
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,7 +35,8 @@ def create_spark_session():
                  .getOrCreate())
         return spark
     except Exception as e:
-        logging.error(f"An error occurred while creating spark session: {e}")
+        logging.error("An error occurred while creating spark session: %s", e)
+        return None
 
 
 def main():
@@ -52,7 +56,7 @@ def main():
         else:
             logging.warning("Skipping create_final_tables() due to errors in create_staged_table()")
     except Exception as e:
-        logging.error(f"An error occurred: {e}")
+        logging.error("An error occurred: %s", e)
     finally:
         spark.stop()
         logging.info("Spark session stopped")
