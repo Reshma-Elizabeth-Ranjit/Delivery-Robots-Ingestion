@@ -19,36 +19,45 @@ def get_holiday_dataset(spark, years_set):
     :param spark: SparkSession
     :return: holiday dataframe
     """
-    holiday_list = holidays.US(years=years_set)
-    holiday_data = [{"date": str(date), "name": name} for date, name in holiday_list.items()]
+    try:
+        holiday_list = holidays.US(years=years_set)
+        holiday_data = [{"date": str(date), "name": name} for date, name in holiday_list.items()]
 
-    # Define schema
-    schema = StructType([
-        StructField("date", StringType(), True),
-        StructField("name", StringType(), True)
-    ])
-    # Create DataFrame from the list of dictionaries
-    holiday_df = spark.createDataFrame(holiday_data, schema)
-    # Convert 'date' column to date
-    holiday_df = holiday_df.withColumn("date", to_date(col("date")))
-    return holiday_df
+        # Define schema
+        schema = StructType([StructField("date", StringType(), True),
+                             StructField("name", StringType(), True)])
+
+        # Create DataFrame from the list of dictionaries
+        holiday_df = spark.createDataFrame(holiday_data, schema)
+
+        # Convert date column to date
+        holiday_df = holiday_df.withColumn("date", to_date(col("date")))
+        return holiday_df
+    except Exception as e:
+        logging.error("Error loading holiday dataset: %s", e)
+        return None
 
 
 def get_city_zones_data(spark):
     """
     To get the city zones data
     :param spark: SparkSession
-    :return: city zones dataframe
+    :return: city zones dataframe which gives the names of city zones
     """
     try:
         load_dotenv("local.env")
         city_zones_data_path = os.getenv('CITY_ZONES_DATA_PATH')
+        if not city_zones_data_path:
+            logging.error("CITY_ZONES_DATA_PATH is not set")
+            return None
         city_zones_df = spark.read.option("header", "true").csv(city_zones_data_path)
+        if city_zones_df is None or city_zones_df.count() <= 0:
+            logging.error("No data found in the provided city zones")
+            return None
         return city_zones_df
     except Exception as e:
         logging.error("Error loading city zones data: %s", e)
         return None
-
 
 def create_final_tables(spark):
     """
@@ -59,16 +68,9 @@ def create_final_tables(spark):
     try:
         zones_df = get_city_zones_data(spark)
         zones_df.createOrReplaceTempView("zones_table")
-        intercity_trip = spark.sql("""
-            SELECT 
-                pu.Borough AS PickupCity,
-                do.Borough AS DropoffCity, y.*
-            FROM robot_trip_staged_table y
-            LEFT JOIN zones_table pu 
-                ON y.PULocationID = pu.LocationID
-            LEFT JOIN zones_table do 
-                ON y.DOLocationID = do.LocationID
-        """)
+        intercity_trip = spark.sql("""SELECT pu.Borough AS PickupCity, do.Borough AS DropoffCity,
+         y.* FROM robot_trip_staged_table y LEFT JOIN zones_table pu ON y.PULocationID = pu.LocationID 
+        LEFT JOIN zones_table do ON y.DOLocationID = do.LocationID """)
         intercity_trip = intercity_trip.filter(intercity_trip.PickupCity !=
                                                intercity_trip.DropoffCity)
         intercity_trip.createOrReplaceTempView("intercity_trip_table")
@@ -82,9 +84,9 @@ def create_final_tables(spark):
         years_set = {year for row in years for year in (row.year.col1, row.year.col2)}
         holiday_dataset = get_holiday_dataset(spark, years_set)
         holiday_dataset.createOrReplaceTempView("holiday_dataset_table")
-        holiday_trip_result = spark.sql("select * from robot_trip_staged_table y "
-                                        "join holiday_dataset_table h on y.pickup_date = h.date "
-                                        "or y.dropoff_date = h.date")
+        holiday_trip_result = spark.sql("select * from robot_trip_staged_table y join "
+                                        "holiday_dataset_table h on y.pickup_date = h.date or "
+                                        "y.dropoff_date = h.date")
         holiday_trip_result.createOrReplaceTempView("holiday_trip_table")
         logging.info("Final Delta tables created successfully")
     except Exception as e:

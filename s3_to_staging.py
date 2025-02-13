@@ -24,10 +24,14 @@ def read_parquet_from_folder(spark, folder_path):
     :param folder_path: the source folder to read the data from
     :return: a DataFrame containing the data in the folder provided
     """
-    files = [str(f) for f in Path(folder_path).rglob("*.parquet")]
-    if not files:
-        raise FileNotFoundError(f"No Parquet files found in {folder_path}")
-    return spark.read.parquet(*files)
+    try:
+        files = [str(f) for f in Path(folder_path).rglob("*.parquet")]
+        if not files:
+            raise FileNotFoundError(f"No Parquet files found in {folder_path}")
+        return spark.read.parquet(*files)
+    except Exception as e:
+        logging.error("An error occurred: %s", e)
+        return None
 
 
 def get_schema():
@@ -83,11 +87,11 @@ def send_alert(message):
     :param message: The alert message that has to be sent
     :return: None
     """
-    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-    if not webhook_url:
-        logging.error("SLACK_WEBHOOK_URL is not set!")
-        return
     try:
+        webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+        if not webhook_url:
+            logging.error("SLACK_WEBHOOK_URL is not set")
+            return
         response = requests.post(webhook_url, json=message, timeout=60)
         response.raise_for_status()
         logging.info("Alert message sent successfully!")
@@ -99,18 +103,14 @@ def validate_and_filter(robot_data_df):
     """
     To run validations and filter anomalies
     :param robot_data_df: the dataframe that has to be validated and filtered
-    :return: the filtered dataframe
+    :return: the filtered dataframe after validation checks are done
     """
     logging.info("Validation and cleansing started")
 
     # Ensuring timestamp format
-    robot_data_df = robot_data_df.withColumn(
-        "tpep_pickup_datetime",
-        to_timestamp(col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")
-    ).withColumn(
-        "tpep_dropoff_datetime",
-        to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")
-    )
+    robot_data_df = (robot_data_df.withColumn("tpep_pickup_datetime", to_timestamp(
+        col("tpep_pickup_datetime"), "yyyy-MM-dd HH:mm:ss")).withColumn(
+        "tpep_dropoff_datetime", to_timestamp(col("tpep_dropoff_datetime"), "yyyy-MM-dd HH:mm:ss")))
 
     # Validate schema first
     if not validate_schema(get_schema(), robot_data_df.schema):
@@ -123,9 +123,9 @@ def validate_and_filter(robot_data_df):
     robot_data_df = robot_data_df.dropDuplicates()
 
     # Validation for pickup/dropoff locations
-    invalid_pickup_location = robot_data_df.filter(col("PULocationID").isNull())
-    invalid_dropoff_location = robot_data_df.filter(col("DOLocationID").isNull())
-    if invalid_pickup_location.count() > 0 or invalid_dropoff_location.count() > 0:
+    invalid_pickup_drop_location = robot_data_df.filter(col("PULocationID").isNull() |
+                                                        col("DOLocationID").isNull())
+    if invalid_pickup_drop_location.count() > 0:
         message = {"text": f"ENV: {env_variable} \n NULL values found for pickup/dropoff locations",
                    "username": "DeliveryRobotAlertBot"}
         send_alert(message)
@@ -140,39 +140,24 @@ def validate_and_filter(robot_data_df):
                            f"pickup/dropoff timestamps",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid values found for pickup/dropoff timestamps")
-        logging.info(f"Count of records with invalid pickup/dropoff "
-                     f"timestamps: {invalid_pickup_drop_times.count()}")
         send_alert(message)
         robot_data_df = robot_data_df.filter(col("tpep_pickup_datetime").isNotNull() & col(
-            "tpep_dropoff_datetime").isNotNull()).filter(col("tpep_dropoff_datetime")
-                                                         > col("tpep_pickup_datetime"))
+            "tpep_dropoff_datetime").isNotNull() & (col("tpep_dropoff_datetime")
+                                                    > col("tpep_pickup_datetime")))
 
-    robot_data_staged_df = robot_data_df.withColumn(
-        "pickup_date",
-        to_date(col("tpep_pickup_datetime"))
-    ).withColumn(
-        "dropoff_date",
-        to_date(col("tpep_dropoff_datetime"))
-    )
+    robot_data_staged_df = (robot_data_df.withColumn("pickup_date", to_date(col(
+        "tpep_pickup_datetime"))).withColumn("dropoff_date", to_date(col("tpep_dropoff_datetime"))))
 
     # Check for negative values for amount fields and filter them out
-    negative_values_filtered_df = robot_data_staged_df.filter(
-        (col("fare_amount") < 0) &
-        (col("trip_distance") < 0) &
-        (col("tip_amount") < 0) &
-        (col("total_amount") < 0))
+    negative_values_filtered_df = robot_data_staged_df.filter((col("fare_amount") < 0) & (
+            col("trip_distance") < 0) & (col("tip_amount") < 0) & (col("total_amount") < 0))
     if negative_values_filtered_df.count() > 0:
         message = {"text": f"ENV: {env_variable} \nNegative values found for amount fields",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Negative values found for amount fields")
-        logging.info(f"Count of records with negative values:{negative_values_filtered_df.count()}")
         send_alert(message)
-        robot_data_staged_df = robot_data_staged_df.filter(
-            (col("fare_amount") >= 0) &
-            (col("trip_distance") >= 0) &
-            (col("tip_amount") >= 0) &
-            (col("total_amount") >= 0)
-        )
+        robot_data_staged_df = robot_data_staged_df.filter((col("fare_amount") >= 0) & (
+                col("trip_distance") >= 0) & (col("tip_amount") >= 0) & (col("total_amount") >= 0))
 
     # Check for valid VendorID
     invalid_vendor_id_df = robot_data_staged_df.filter(~col("VendorID").isin([1, 2]))
@@ -180,7 +165,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid Vendor IDs found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid Vendor IDs found")
-        logging.info(f"Count of records with invalid Vendor IDs : {invalid_vendor_id_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("VendorID").isin([1, 2]))
 
@@ -190,8 +174,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid passenger count found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid passenger count found")
-        logging.info(f"Count of records with invalid passenger counts: "
-                     f"{invalid_passenger_count_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("passenger_count") >= 0)
 
@@ -201,8 +183,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid trip_distance found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid trip_distance found")
-        logging.info(f"Count of records with invalid trip_distance : "
-                     f"{invalid_trip_distance_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("trip_distance") >= 0)
 
@@ -213,8 +193,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid store_and_fwd_flag found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid store_and_fwd_flag found")
-        logging.info(f"Count of records with invalid store_and_fwd_flag : "
-                     f"{invalid_store_and_fwd_flag_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("store_and_fwd_flag")
                                                            .isin(["Y", "N"]))
@@ -225,8 +203,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid RatecodeID found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid RatecodeIDs found")
-        logging.info(f"Count of records with invalid RatecodeIDs : "
-                     f"{invalid_ratecodeid_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("RatecodeID")
                                                            .isin([1, 2, 3, 4, 5, 6]))
@@ -238,8 +214,6 @@ def validate_and_filter(robot_data_df):
         message = {"text": f"ENV: {env_variable} \n Invalid payment_type found",
                    "username": "DeliveryRobotAlertBot"}
         logging.warning("Invalid payment_type found")
-        logging.info(f"Count of records with invalid payment_type: "
-                     f"{invalid_payment_type_df.count()}")
         send_alert(message)
         robot_data_staged_df = robot_data_staged_df.filter(col("payment_type")
                                                            .isin([1, 2, 3, 4, 5, 6]))

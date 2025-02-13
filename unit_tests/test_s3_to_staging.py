@@ -51,5 +51,4 @@ def test_validate_and_filter(spark):
                 )]
     test_data_df = spark.createDataFrame(data, get_schema())
     filtered_df = validate_and_filter(test_data_df)
-    assert filtered_df is not None
-    assert filtered_df.count() == 1
+    assert filtered_df.count() == 0 # as pickup and drop times are same

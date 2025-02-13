@@ -27,12 +27,9 @@ def create_spark_session():
         executor_memory = os.getenv('SPARK_EXECUTOR_MEMORY', '4g')
 
         # Create SparkSession using environment variables
-        spark = (SparkSession.builder
-                 .master(master)
-                 .appName(app_name)
+        spark = (SparkSession.builder.master(master).appName(app_name)
                  .config("spark.driver.memory", driver_memory)
-                 .config("spark.executor.memory", executor_memory)
-                 .getOrCreate())
+                 .config("spark.executor.memory", executor_memory).getOrCreate())
         return spark
     except Exception as e:
         logging.error("An error occurred while creating spark session: %s", e)
@@ -47,12 +44,13 @@ def main():
     spark = create_spark_session()
     logging.info("Spark session started")
     try:
-        logging.info("Starting data processing pipeline")
+        logging.info("Starting Delivery Robot data processing pipeline")
 
         # Read data from S3 and create staging delta tables
         if s3_to_staging.create_staged_table(spark):
             # Create final delta tables after transformations
             staging_to_delta.create_final_tables(spark)
+            logging.info("Delivery Robot data processing pipeline completed")
         else:
             logging.warning("Skipping create_final_tables() due to errors in create_staged_table()")
     except Exception as e:
