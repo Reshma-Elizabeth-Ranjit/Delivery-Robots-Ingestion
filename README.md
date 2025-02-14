@@ -1,6 +1,6 @@
 **Delivery Robots Ingestion Framework**
 
-This project handles the ingestion, validation, cleansing, and processing of delivery robots' trip data using Databricks on Apache Spark. The code is written mainly in Python and PySpark.
+This framework simulates delivery robot trips using NYC Taxi data to demonstrate ingestion, validation, cleansing, and processing workflows. The code is written mainly in Python and PySpark running on Databricks, which leverages Apache Spark for distributed data processing.
 
 Architecture diagram:
 
@@ -23,13 +23,21 @@ Installation steps:
 2. Open the project in PyCharm
 3. Install the required packages in the requirements.txt
 4. Set up environment variables in a .env file in the project root (slack URLs or anything containing sensitive data shouldn't be added to git)
+   Environment variables used:
+    - `SLACK_WEBHOOK_URL`: Webhook URL for Slack notifications.  
+    - `SPARK_DRIVER_MEMORY`: Memory allocated for the Spark driver node.
+    - `SPARK_EXECUTOR_MEMORY`: Memory allocated for each Spark executor.
+    - `CITY_ZONES_DATA_PATH`: Path to the taxi zone lookup CSV file.
+    - `ENV`: Environment where the app is running (local, dev, prod). 
+
 
 How to run the project?
 
-Run the main script, which will call the run the functions in the other files
+Run the main script, which will call the run the functions in the other files. Run the below command or use the run option in Pycharm.
+Command: "python main.py"
 
 How to Run Unit tests?
 
 In PyCharm, open the terminal and run the below command:
 
-"pytest unit_tests/test_s3_to_staging.py"
+Command: "pytest unit_tests/test_s3_to_staging.py"
