@@ -5,9 +5,12 @@ This framework simulates delivery robot trips using NYC Taxi data to demonstrate
 Architecture diagram:
 
 An architecture diagram is designed that allows us to collect, process and analyze data from our robots delivery operation as well as send data back to individual robots.
+
 PFB the diagram:
 
-[Delivery_Robot_Ingestion_Framework.pdf](https://github.com/user-attachments/files/18787115/Delivery_Robot_Ingestion_Framework.pdf)
+[Delivery_Robot_Ingestion_Framework.pdf](https://github.com/user-attachments/files/18797764/Delivery_Robot_Ingestion_Framework.pdf)
+
+
 
 Prerequisites:
 
