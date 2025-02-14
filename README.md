@@ -11,7 +11,6 @@ PFB the diagram:
 [Delivery_Robot_Ingestion_Framework.pdf](https://github.com/user-attachments/files/18797764/Delivery_Robot_Ingestion_Framework.pdf)
 
 
-
 Prerequisites:
 
 - Python version: Python 3.11.0
@@ -26,6 +25,7 @@ Installation steps:
 2. Open the project in PyCharm
 3. Install the required packages in the requirements.txt
 4. Set up environment variables in a .env file in the project root (slack URLs or anything containing sensitive data shouldn't be added to git)
+
    Environment variables used:
     - `SLACK_WEBHOOK_URL`: Webhook URL for Slack notifications.  
     - `SPARK_DRIVER_MEMORY`: Memory allocated for the Spark driver node.
