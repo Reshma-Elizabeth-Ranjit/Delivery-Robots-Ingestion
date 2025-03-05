@@ -37,6 +37,7 @@ Installation steps:
 How to run the project?
 
 Run the main script, which will call the run the functions in the other files. Run the below command or use the run option in Pycharm.
+
 Command: "python main.py"
 
 How to Run Unit tests?
