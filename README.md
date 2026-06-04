@@ -10,7 +10,7 @@ PFB the diagram:
 
 [Delivery_Robot_Ingestion_Framework.pdf](https://github.com/user-attachments/files/18797764/Delivery_Robot_Ingestion_Framework.pdf)
 
-PPT explaining the project: [Delivery_Robot (2).pdf](https://github.com/user-attachments/files/28591445/Delivery_Robot.2.pdf)
+PPT explaining the project: [Delivery_Robot_ppt.pdf](https://github.com/user-attachments/files/28591503/Delivery_Robot_ppt.pdf)
 
 Prerequisites:
 
